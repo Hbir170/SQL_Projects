@@ -1,0 +1,253 @@
+CREATE DATABASE HR_Project;
+USE  HR_Project
+SELECT * FROM hr;
+
+#changing column name to emp_id as it has special characters from import
+ALTER TABLE hr
+CHANGE COLUMN ï»¿id emp_id TEXT;
+
+ALTER TABLE hr
+MODIFY COLUMN emp_id VARCHAR(20);
+
+#DATA CLEANING
+
+#SETTINGS FOR SQL CLEANING
+SET sql_safe_updates = 0 
+SET SQL_MODE = ''
+
+#ACTUAL CLEANING 
+#Transforming birthdate, hire_date,termdate columns from text to date format
+UPDATE hr
+SET birthdate = CASE
+	WHEN birthdate LIKE '%/%' THEN date_format(str_to_date(birthdate,'%m/%d/%Y'),'%Y-%m-%d') 
+    WHEN birthdate LIKE '%-%' THEN date_format(str_to_date(birthdate,'%m-%d-%Y'),'%Y-%m-%d')
+    ELSE NULL
+END;
+
+UPDATE hr
+SET hire_date = CASE
+	WHEN hire_date LIKE '%/%' THEN date_format(str_to_date(hire_date,'%m/%d/%Y'),'%Y-%m-%d') 
+    WHEN hire_date LIKE '%-%' THEN date_format(str_to_date(hire_date,'%m-%d-%Y'),'%Y-%m-%d')
+    ELSE NULL
+END;
+
+# Below we are converting the column data types to date after having brought them to the correct format from above
+ALTER TABLE hr
+MODIFY COLUMN hire_date DATE;
+
+ALTER TABLE hr
+MODIFY COLUMN birthdate DATE;
+
+
+#Below we are converting all term date (termination dates) that aren't null to a date format instead of text and removing the timestamp from them
+UPDATE hr
+SET termdate = date(str_to_date(termdate,'%Y-%m-%d %H:%i:%s UTC'))
+WHERE termdate IS NOT NULL AND termdate != '';  
+
+SELECT termdate from HR;
+
+#Converting termdate column to Date format
+ALTER TABLE hr 
+MODIFY COLUMN termdate DATE;
+
+
+#ADDING AN AGE COLUMN TO BETTER UNDERSTAND EACH PERSONS AGE AND PREVENT SLOWDOWN OF QUIERIES WHEN CALCULATING INDIVIDUALLY 
+ALTER TABLE hr
+ADD COLUMN age INT;
+
+#use timestampdiff function to calculate difference between two dates (current date = Curdate, specified date is birthdate, YEAR is the measure)
+UPDATE hr
+SET age = timestampdiff(YEAR, birthdate, CURDATE()); 
+
+SELECT birthdate,age FROM hr;
+# We now notice some outliers in our data like negative ages so we'll dig deeper
+
+SELECT 
+	min(age) as youngest,
+    max(age) as eldest
+FROM hr
+# we see -46, so we'll dig deeper... Eldest age at 58 looks fine. Below we try to find any employees with age below 18 (not valid) 
+
+#We see 967 entries with birthdates that are not valid
+SELECT count(*) FROM hr
+WHERE age < 18;
+
+# we now see we have over 20000 employees in total
+SELECT count(*) FROM hr
+
+#removing 967 rows from the dataset that have improper birthdates as we have significant data and can move forward without it (always remember to work on a copy of the dataset when doing this)
+DELETE FROM hr
+where age < 18;
+
+# DATA Analysis Questions: 
+'''
+1) Gender Breakdown of Employees
+2) Race Breakdown of employees
+3) Age Distribution of Employees
+4) Location of Employees (At home vs On site) 
+5) Average Length of Employment for Terminated Employees
+6) Gender distribution across departments
+7) Job Title Distribution
+8) Department with highest turnover rate 
+9) Distribution of Employees across locations by City and State 
+10) Change in Employees Over Time
+11) Average Tenure (length of stay) per department
+12) Cities with highest turnover rate (need to use subquery to pull data)
+13) Average Age per Department
+'''
+
+#1) Gender Breakdown 
+SELECT GENDER, count(*) AS count
+FROM hr
+WHERE termdate = '0000-00-00' AND termdate <=curdate()
+GROUP BY GENDER; 
+
+#2) Race Breakdown
+SELECT race, count(*) as count
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY race
+ORDER BY race DESC; 
+
+#3) Age Breakdown
+# First breakdown min and max age
+SELECT 
+	min(age),
+    max(age)
+FROM hr
+WHERE termdate = '0000-00-00'
+# min is 21 max is 58
+
+#now create cases 
+SELECT 
+	CASE
+		WHEN age >= 18 AND age < 24 THEN '18-24'
+        WHEN age >= 25 AND age < 34 THEN '25-34'
+        WHEN age >= 35 AND age < 44 THEN '35-44'
+        WHEN age >= 45 AND age < 54 THEN '45-54'
+        ELSE '55+'
+	END AS age_group,
+    COUNT(*) AS count
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY age_group
+ORDER BY age_group;
+
+#Same thing but with Gender breakdown among age groups
+SELECT 
+	CASE
+		WHEN age >= 18 AND age < 24 THEN '18-24'
+        WHEN age >= 25 AND age < 34 THEN '25-34'
+        WHEN age >= 35 AND age < 44 THEN '35-44'
+        WHEN age >= 45 AND age < 54 THEN '45-54'
+        ELSE '55+'
+	END AS age_group,
+    gender, COUNT(*) AS count
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY age_group, gender
+ORDER BY age_group, gender;
+
+# 4) Location
+SELECT location, count(*) 
+FROM hr 
+WHERE termdate = '0000-00-00'
+GROUP BY location
+
+#5) Average Length of Employment for Terminated Employees
+SELECT round(avg(datediff(termdate,hire_date))/365,0) as avg_years_of_employment
+FROM hr
+WHERE termdate <= curdate() AND termdate <> '0000-00-00';
+# date diff function subtracts the terminated date from hire date and finds avg length of all employees who were terminated then divides it by 365 for years of employment
+# we make sure that our filter has valid termination days and that it is not including people currently employed
+
+# 6) Gender distribution across departments
+SELECT gender, department, count(*) as COUNT
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY gender, department
+ORDER BY department;
+
+#7) Job Title Distribution (will help management assess which departments have too many or few people and other areas of improvement)
+SELECT jobtitle, count(*)
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY jobtitle
+ORDER BY jobtitle;
+
+#8) Department with highest turnover rate (need to use subquery to pull data)
+SELECT department, total_count, terminated_count, terminated_count/total_count*100 as termination_rate
+FROM 
+(SELECT department,
+count(*) as total_count,
+SUM(CASE WHEN termdate <> '0000-00-00' AND termdate <= curdate() THEN 1 ELSE 0 END) as terminated_count
+FROM hr
+GROUP BY department) as subquery
+ORDER BY termination_rate DESC; 
+
+
+
+#above using the sum case we add 1 to our terminated count everytime an employee meets the case criteria 
+
+#9) Distribution of Employees across locations by City and State 
+SELECT location_city,location_state, count(*) as COUNT
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY location_city,location_state
+ORDER BY COUNT DESC;
+
+#10) DETERMINE DIFFERENCE IN HIRES VS FIRED EMPLOYEES
+SELECT years, 
+total_hired, 
+fires, 
+total_hired-fires as net_change, 
+round((total_hired-fires)/total_hired*100,2) as net_change_percent
+FROM 
+(SELECT YEAR(hire_date) as years,
+count(*) as total_hired,
+SUM(CASE WHEN termdate <> '0000-00-00' AND termdate <= curdate() THEN 1 ELSE 0 END) as fires
+FROM hr
+GROUP BY years) as subquery
+ORDER BY years; 
+#We can see the relation of hires increasing and net change being correlated with incoming years
+
+#11) Average Tenure (length of stay) per department
+SELECT department, round(avg(datediff(termdate,hire_date)/365),0) as avg_tenure
+FROM hr
+WHERE termdate <> '0000-00-00' AND termdate <= curdate() 
+GROUP BY department
+ORDER BY avg_tenure DESC;
+# we use Term <= Curdate() as someone can be fired today so we want to include that
+
+#12) Cities with highest turnover rate (need to use subquery to pull data)
+SELECT location_city, total_count, terminated_count, terminated_count/total_count*100 as termination_rate
+FROM 
+(SELECT location_city,
+count(*) as total_count,
+SUM(CASE WHEN termdate <> '0000-00-00' AND termdate <= curdate() THEN 1 ELSE 0 END) as terminated_count
+FROM hr
+GROUP BY location_city) as subquery
+ORDER BY termination_rate DESC LIMIT 10; 
+
+SELECT * FROM hr;
+
+#13) Average Age per Department
+SELECT department, round(AVG(age),0)
+FROM hr
+WHERE termdate = '0000-00-00'
+GROUP BY department
+
+
+#Additional/Extra Variables Used: 
+
+#Average Age
+SELECT round(avg(age),0)
+FROM hr
+WHERE termdate = '0000-00-00' AND termdate <= curdate();
+
+#Most Worked Job Title/Profession and Department
+SELECT jobtitle,department,count(*) as COUNT
+FROM hr
+WHERE termdate = '0000-00-00' AND termdate <= curdate()
+GROUP BY jobtitle,department
+ORDER BY COUNT DESC LIMIT 3;
